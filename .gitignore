@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Environment variables
+.env
+.env.*
+
+# Python RAG local data
+medical-rag-python/chroma_db/
+medical-rag-python/uploads/
+
+# Node
+medical-app/node_modules/
+medical-app/dist/
+
+# Java / Maven
+medical-backend/target/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+medical-backend/medical-rag-python/
+
+# Secrets
+medical-backend/src/main/resources/application.properties
