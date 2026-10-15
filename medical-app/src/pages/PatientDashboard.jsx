@@ -1,141 +1,253 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 
 function PatientDashboard() {
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [question, setQuestion] = useState("");
+  const BACKEND_URL = "http://localhost:8080";
 
-  const [messages, setMessages] = useState([]);
+  const patientId = localStorage.getItem("userId");
+  const token = localStorage.getItem("token");
+  const patientName = localStorage.getItem("name");
 
-  const [uploading, setUploading] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [uploadMessage, setUploadMessage] = useState("");
+  const [symptoms, setSymptoms] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
-  // ---------------------------------------
-  // Upload PDF
-  // ---------------------------------------
+  const [reports, setReports] = useState([]);
+  const [loadingReports, setLoadingReports] = useState(true);
 
-  const uploadPDF = async () => {
-    if (!selectedFile) {
-      setUploadMessage("Please select a PDF first.");
+  const [error, setError] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
+
+  // =====================================================
+  // CHECK AUTHENTICATION
+  // =====================================================
+
+  useEffect(() => {
+    if (!token || !patientId) {
+      window.location.href = "/";
       return;
     }
 
-    const formData = new FormData();
-    formData.append("file", selectedFile);
+    fetchReports();
+  }, []);
 
-    setUploading(true);
-    setUploadMessage("");
+  // =====================================================
+  // FETCH PATIENT REPORTS
+  // =====================================================
 
+  const fetchReports = async () => {
     try {
+      setLoadingReports(true);
+      setError("");
+
+      if (!token || !patientId) {
+        throw new Error("You are not logged in.");
+      }
+
+      // IMPORTANT:
+      // Backend now identifies the patient from JWT.
+      // We no longer send patientId in the URL.
       const response = await fetch(
-        "http://127.0.0.1:8001/upload",
+        `${BACKEND_URL}/api/patient/reports`,
         {
-          method: "POST",
-          body: formData,
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
         }
       );
 
-      if (!response.ok) {
-        throw new Error("Upload failed");
+      const contentType =
+        response.headers.get("content-type") || "";
+
+      let data;
+
+      if (contentType.includes("application/json")) {
+        data = await response.json();
+      } else {
+        const text = await response.text();
+
+        data = {
+          message: text,
+        };
       }
 
-      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(
+          data.message ||
+            data.error ||
+            "Failed to fetch reports"
+        );
+      }
 
-      setUploadMessage(data.message);
-
-      // Clear previous conversation when a new document is uploaded
-      setMessages([]);
-
-    } catch (error) {
-      console.error(error);
-
-      setUploadMessage(
-        "Unable to upload PDF. Please try again."
+      setReports(
+        Array.isArray(data)
+          ? data
+          : []
       );
+
+    } catch (err) {
+      console.error(
+        "Reports error:",
+        err
+      );
+
+      setError(
+        err.message ||
+          "Unable to load your medical reports."
+      );
+
     } finally {
-      setUploading(false);
+      setLoadingReports(false);
     }
   };
 
+  // =====================================================
+  // SUBMIT SYMPTOMS
+  // =====================================================
 
-  // ---------------------------------------
-  // Ask Question
-  // ---------------------------------------
+  const submitSymptoms = async () => {
+    const currentSymptoms =
+      symptoms.trim();
 
-  const askQuestion = async () => {
-    const currentQuestion = question.trim();
-
-    if (!currentQuestion) {
+    if (!currentSymptoms) {
+      setError(
+        "Please describe your symptoms."
+      );
       return;
     }
 
-    // Add user question immediately
-    setMessages((previousMessages) => [
-      ...previousMessages,
-      {
-        type: "user",
-        text: currentQuestion,
-      },
-    ]);
-
-    setQuestion("");
-    setLoading(true);
-
     try {
-      const response = await fetch(
-        `http://127.0.0.1:8001/ask?question=${encodeURIComponent(
-          currentQuestion
-        )}`
-      );
+      setSubmitting(true);
+      setError("");
+      setSuccessMessage("");
 
-      if (!response.ok) {
-        throw new Error("Failed to get answer");
+      if (!token || !patientId) {
+        throw new Error(
+          "You are not logged in."
+        );
       }
 
-      const data = await response.json();
+      // Backend gets patient identity from JWT.
+      const url =
+        `${BACKEND_URL}/api/patient/reports/create` +
+        `?symptoms=${encodeURIComponent(
+          currentSymptoms
+        )}`;
 
-      // Add AI answer
-      setMessages((previousMessages) => [
-        ...previousMessages,
+      const response = await fetch(
+        url,
         {
-          type: "ai",
-          text: data.answer,
-        },
-      ]);
+          method: "POST",
 
-    } catch (error) {
-      console.error(error);
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
 
-      setMessages((previousMessages) => [
-        ...previousMessages,
-        {
-          type: "ai",
-          text: "Unable to get an answer. Please try again.",
-        },
-      ]);
+      const contentType =
+        response.headers.get("content-type") || "";
+
+      let data;
+
+      if (
+        contentType.includes(
+          "application/json"
+        )
+      ) {
+        data = await response.json();
+      } else {
+        const text =
+          await response.text();
+
+        data = {
+          message: text,
+        };
+      }
+
+      if (!response.ok) {
+        throw new Error(
+          data.message ||
+            data.error ||
+            "Failed to create medical report"
+        );
+      }
+
+      setSuccessMessage(
+        "Your symptoms have been analyzed successfully."
+      );
+
+      setSymptoms("");
+
+      // Refresh reports after successful creation
+      await fetchReports();
+
+    } catch (err) {
+      console.error(
+        "Symptom submission error:",
+        err
+      );
+
+      setError(
+        err.message ||
+          "Unable to analyze your symptoms."
+      );
 
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   };
 
-
-  // ---------------------------------------
-  // Enter key
-  // ---------------------------------------
+  // =====================================================
+  // ENTER KEY
+  // =====================================================
 
   const handleKeyDown = (event) => {
-    if (event.key === "Enter" && !event.shiftKey) {
+    if (
+      event.key === "Enter" &&
+      !event.shiftKey
+    ) {
       event.preventDefault();
-      askQuestion();
+
+      submitSymptoms();
     }
   };
 
+  // =====================================================
+  // LOGOUT
+  // =====================================================
+
+  const handleLogout = () => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("role");
+    localStorage.removeItem("userId");
+    localStorage.removeItem("name");
+    localStorage.removeItem("email");
+
+    window.location.href = "/";
+  };
+
+  // =====================================================
+  // LOADING
+  // =====================================================
+
+  if (loadingReports) {
+    return (
+      <div style={styles.loadingPage}>
+        <h2>
+          Loading Patient Dashboard...
+        </h2>
+      </div>
+    );
+  }
+
+  // =====================================================
+  // MAIN UI
+  // =====================================================
 
   return (
     <div style={styles.page}>
 
-      {/* Sidebar */}
+      {/* SIDEBAR */}
 
       <aside style={styles.sidebar}>
 
@@ -143,259 +255,318 @@ function PatientDashboard() {
           MediRAG
         </h2>
 
+        <div style={styles.patientInfo}>
+
+          <div style={styles.patientAvatar}>
+            👤
+          </div>
+
+          <div>
+
+            <strong>
+              {patientName || "Patient"}
+            </strong>
+
+            <p style={styles.patientRole}>
+              Patient
+            </p>
+
+          </div>
+
+        </div>
+
         <div style={styles.activeMenu}>
           🏠 Dashboard
         </div>
 
         <div style={styles.menuItem}>
-          📄 My Medical Report
+          🩺 My Symptoms
         </div>
 
         <div style={styles.menuItem}>
-          💬 Ask AI
+          📋 My Reports
         </div>
+
+        <button
+          onClick={handleLogout}
+          style={styles.logoutButton}
+        >
+          Logout
+        </button>
 
       </aside>
 
-
-      {/* Main */}
+      {/* MAIN CONTENT */}
 
       <main style={styles.main}>
 
-        {/* Header */}
+        {/* HEADER */}
 
         <div style={styles.header}>
 
           <div>
+
             <h1 style={styles.title}>
               Patient Dashboard
             </h1>
 
             <p style={styles.subtitle}>
-              Upload your medical report and ask questions
+              Describe your symptoms and review
+              your medical reports.
             </p>
+
           </div>
 
           <div style={styles.status}>
-            ● AI Assistant Ready
+            ● Medical RAG Ready
           </div>
 
         </div>
 
+        {/* ERROR */}
 
-        {/* Upload Card */}
+        {error && (
+          <div style={styles.errorMessage}>
+            {error}
+          </div>
+        )}
+
+        {/* SUCCESS */}
+
+        {successMessage && (
+          <div style={styles.successMessage}>
+            {successMessage}
+          </div>
+        )}
+
+        {/* SYMPTOM INPUT */}
 
         <div style={styles.card}>
 
-          <h2>
-            Upload Medical Report
+          <h2 style={styles.cardTitle}>
+            Describe Your Symptoms
           </h2>
 
           <p style={styles.description}>
-            Upload a PDF medical report to ask questions
-            about its contents.
+            Tell us what symptoms you are
+            experiencing. The Medical RAG system
+            will retrieve relevant information from
+            the doctor's uploaded medical knowledge
+            base.
           </p>
 
-          <div style={styles.uploadBox}>
+          <textarea
+            value={symptoms}
+            onChange={(e) =>
+              setSymptoms(e.target.value)
+            }
+            onKeyDown={handleKeyDown}
+            placeholder="Example: I have fever, headache and body pain..."
+            rows={6}
+            style={styles.symptomTextarea}
+          />
 
-            <div style={styles.uploadIcon}>
-              📄
+          <button
+            onClick={submitSymptoms}
+            disabled={submitting}
+            style={{
+              ...styles.primaryButton,
+              opacity: submitting
+                ? 0.6
+                : 1,
+              cursor: submitting
+                ? "not-allowed"
+                : "pointer",
+            }}
+          >
+            {submitting
+              ? "Analyzing..."
+              : "Analyze Symptoms"}
+          </button>
+
+          <p style={styles.disclaimer}>
+            This AI analysis provides possible
+            medical information and is not a
+            definitive diagnosis. A qualified doctor
+            should make the final clinical assessment.
+          </p>
+
+        </div>
+
+        {/* MY REPORTS */}
+
+        <div style={styles.card}>
+
+          <div style={styles.reportHeader}>
+
+            <div>
+
+              <h2 style={styles.cardTitle}>
+                My Medical Reports
+              </h2>
+
+              <p style={styles.description}>
+                Previous symptom analyses are
+                shown below.
+              </p>
+
             </div>
 
-            <p>
-              Select your medical PDF
-            </p>
-
-            <input
-              type="file"
-              accept=".pdf,application/pdf"
-              onChange={(e) =>
-                setSelectedFile(e.target.files[0])
-              }
-            />
-
-            <br />
-            <br />
-
             <button
-              onClick={uploadPDF}
-              disabled={uploading}
-              style={styles.primaryButton}
+              onClick={fetchReports}
+              style={styles.refreshButton}
             >
-              {uploading
-                ? "Uploading..."
-                : "Upload PDF"}
-            </button>
-
-            {selectedFile && (
-              <p style={styles.fileName}>
-                Selected: {selectedFile.name}
-              </p>
-            )}
-
-            {uploadMessage && (
-              <p style={styles.successMessage}>
-                {uploadMessage}
-              </p>
-            )}
-
-          </div>
-
-        </div>
-
-
-        {/* Chat Card */}
-
-        <div style={styles.card}>
-
-          <h2>
-            Ask About Your Report
-          </h2>
-
-          <p style={styles.description}>
-            Ask questions based only on your uploaded
-            medical document.
-          </p>
-
-
-          {/* Chat History */}
-
-          <div style={styles.chatBox}>
-
-            {messages.length === 0 && (
-              <div style={styles.emptyChat}>
-                <div style={styles.emptyIcon}>
-                  💬
-                </div>
-
-                <p>
-                  Ask a question about your medical report
-                  to get started.
-                </p>
-              </div>
-            )}
-
-
-            {messages.map((message, index) => (
-
-              <div
-                key={index}
-                style={
-                  message.type === "user"
-                    ? styles.userMessage
-                    : styles.aiMessage
-                }
-              >
-
-                <div style={styles.messageLabel}>
-                  {message.type === "user"
-                    ? "You"
-                    : "🤖 MediRAG"}
-                </div>
-
-                <div>
-                  {message.text}
-                </div>
-
-              </div>
-
-            ))}
-
-
-            {loading && (
-              <div style={styles.aiMessage}>
-                <div style={styles.messageLabel}>
-                  🤖 MediRAG
-                </div>
-
-                Thinking...
-              </div>
-            )}
-
-          </div>
-
-
-          {/* Question Input */}
-
-          <div style={styles.inputRow}>
-
-            <textarea
-              rows="2"
-              placeholder="Ask a question about your report..."
-              value={question}
-              onChange={(e) =>
-                setQuestion(e.target.value)
-              }
-              onKeyDown={handleKeyDown}
-              style={styles.textarea}
-            />
-
-            <button
-              onClick={askQuestion}
-              disabled={loading}
-              style={styles.askButton}
-            >
-              {loading ? "..." : "Ask"}
+              Refresh
             </button>
 
           </div>
 
-          <p style={styles.hint}>
-            Press Enter to ask • Shift + Enter for a new line
-          </p>
+          {reports.length === 0 ? (
+
+            <div style={styles.emptyReports}>
+
+              <div style={styles.emptyIcon}>
+                📋
+              </div>
+
+              <p>
+                No medical reports yet.
+              </p>
+
+              <p style={styles.description}>
+                Submit your symptoms above to create
+                your first report.
+              </p>
+
+            </div>
+
+          ) : (
+
+            <div>
+
+              {reports.map((report) => (
+
+                <div
+                  key={report.id}
+                  style={styles.reportCard}
+                >
+
+                  <div style={styles.reportTop}>
+
+                    <h3>
+                      Medical Report #{report.id}
+                    </h3>
+
+                    <span
+                      style={styles.reportDate}
+                    >
+                      {report.createdAt
+                        ? new Date(
+                            report.createdAt
+                          ).toLocaleString()
+                        : "Date unavailable"}
+                    </span>
+
+                  </div>
+
+                  {/* SYMPTOMS */}
+
+                  <div style={styles.section}>
+
+                    <h4>
+                      Symptoms
+                    </h4>
+
+                    <p
+                      style={styles.reportText}
+                    >
+                      {report.symptoms}
+                    </p>
+
+                  </div>
+
+                  {/* AI RESPONSE */}
+
+                  <div style={styles.aiBox}>
+
+                    <h4>
+                      🤖 Medical RAG Analysis
+                    </h4>
+
+                    <p
+                      style={styles.reportText}
+                    >
+                      {report.aiResponse ||
+                        "No AI analysis available."}
+                    </p>
+
+                  </div>
+
+                </div>
+
+              ))}
+
+            </div>
+
+          )}
 
         </div>
 
-
-        {/* Information Cards */}
+        {/* INFORMATION CARDS */}
 
         <div style={styles.cardsRow}>
 
           <div style={styles.smallCard}>
-            <div style={styles.icon}>
-              🔒
-            </div>
 
-            <h3>
-              Document Based
-            </h3>
-
-            <p>
-              Answers are generated using the uploaded
-              medical document.
-            </p>
-          </div>
-
-
-          <div style={styles.smallCard}>
             <div style={styles.icon}>
               🧠
             </div>
 
             <h3>
-              AI Powered
+              RAG Powered
             </h3>
 
             <p>
-              Retrieval augmented generation finds
-              relevant information.
+              Relevant information is retrieved
+              from medical documents before
+              generating a response.
             </p>
+
           </div>
 
-
           <div style={styles.smallCard}>
+
             <div style={styles.icon}>
-              📚
+              👨‍⚕️
             </div>
 
             <h3>
-              Context Aware
+              Doctor Review
             </h3>
 
             <p>
-              Questions are answered using relevant
-              document sections.
+              Your report can be reviewed by a
+              doctor who makes the final clinical
+              assessment.
             </p>
+
+          </div>
+
+          <div style={styles.smallCard}>
+
+            <div style={styles.icon}>
+              🔒
+            </div>
+
+            <h3>
+              Secure Reports
+            </h3>
+
+            <p>
+              Your symptom reports and AI analysis
+              are stored for later review.
+            </p>
+
           </div>
 
         </div>
@@ -407,9 +578,9 @@ function PatientDashboard() {
 }
 
 
-// ---------------------------------------
-// Styles
-// ---------------------------------------
+// =====================================================
+// STYLES
+// =====================================================
 
 const styles = {
 
@@ -420,15 +591,43 @@ const styles = {
     fontFamily: "Arial, sans-serif",
   },
 
+  loadingPage: {
+    minHeight: "100vh",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    background: "#f5f7fb",
+    fontFamily: "Arial, sans-serif",
+  },
+
   sidebar: {
     width: "230px",
     background: "#111827",
     color: "white",
     padding: "30px 20px",
+    boxSizing: "border-box",
   },
 
   logo: {
-    marginBottom: "40px",
+    marginBottom: "30px",
+  },
+
+  patientInfo: {
+    display: "flex",
+    alignItems: "center",
+    gap: "10px",
+    padding: "12px 5px",
+    marginBottom: "25px",
+  },
+
+  patientAvatar: {
+    fontSize: "28px",
+  },
+
+  patientRole: {
+    margin: "3px 0 0",
+    fontSize: "12px",
+    color: "#9ca3af",
   },
 
   activeMenu: {
@@ -444,9 +643,21 @@ const styles = {
     borderRadius: "8px",
   },
 
+  logoutButton: {
+    width: "100%",
+    marginTop: "30px",
+    padding: "12px",
+    border: "1px solid #374151",
+    borderRadius: "8px",
+    background: "transparent",
+    color: "white",
+    cursor: "pointer",
+  },
+
   main: {
     flex: 1,
     padding: "35px",
+    boxSizing: "border-box",
   },
 
   header: {
@@ -459,10 +670,12 @@ const styles = {
   title: {
     margin: 0,
     fontSize: "30px",
+    color: "#111827",
   },
 
   subtitle: {
     color: "#6b7280",
+    marginTop: "8px",
   },
 
   status: {
@@ -478,128 +691,133 @@ const styles = {
     borderRadius: "12px",
     padding: "25px",
     marginBottom: "25px",
-    boxShadow: "0 2px 10px rgba(0,0,0,0.06)",
+    boxShadow:
+      "0 2px 10px rgba(0,0,0,0.06)",
+  },
+
+  cardTitle: {
+    marginTop: 0,
+    color: "#111827",
   },
 
   description: {
     color: "#6b7280",
+    lineHeight: "1.6",
   },
 
-  uploadBox: {
-    border: "2px dashed #d1d5db",
-    borderRadius: "10px",
-    padding: "30px",
-    textAlign: "center",
-    marginTop: "20px",
-  },
-
-  uploadIcon: {
-    fontSize: "40px",
-  },
-
-  fileName: {
-    color: "#374151",
-    fontWeight: "bold",
-  },
-
-  successMessage: {
-    color: "#16a34a",
-    fontWeight: "bold",
+  symptomTextarea: {
+    width: "100%",
+    boxSizing: "border-box",
+    padding: "15px",
+    borderRadius: "8px",
+    border: "1px solid #d1d5db",
+    fontSize: "16px",
+    resize: "vertical",
+    fontFamily: "Arial, sans-serif",
+    marginTop: "15px",
   },
 
   primaryButton: {
-    padding: "11px 20px",
+    marginTop: "15px",
+    padding: "12px 24px",
     border: "none",
     borderRadius: "8px",
     background: "#2563eb",
     color: "white",
+    fontSize: "16px",
+  },
+
+  disclaimer: {
+    marginTop: "15px",
+    fontSize: "13px",
+    color: "#6b7280",
+    lineHeight: "1.5",
+  },
+
+  errorMessage: {
+    padding: "15px",
+    marginBottom: "20px",
+    background: "#fee2e2",
+    color: "#991b1b",
+    borderRadius: "8px",
+    border: "1px solid #fecaca",
+  },
+
+  successMessage: {
+    padding: "15px",
+    marginBottom: "20px",
+    background: "#dcfce7",
+    color: "#166534",
+    borderRadius: "8px",
+    border: "1px solid #bbf7d0",
+  },
+
+  reportHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+  },
+
+  refreshButton: {
+    padding: "9px 16px",
+    border: "none",
+    borderRadius: "7px",
+    background: "#2563eb",
+    color: "white",
     cursor: "pointer",
-    fontSize: "15px",
   },
 
-  chatBox: {
-    minHeight: "300px",
-    maxHeight: "500px",
-    overflowY: "auto",
-    border: "1px solid #e5e7eb",
-    borderRadius: "10px",
-    padding: "20px",
-    background: "#fafafa",
-    marginTop: "20px",
-  },
-
-  emptyChat: {
+  emptyReports: {
     textAlign: "center",
+    padding: "50px 20px",
     color: "#9ca3af",
-    padding: "80px 20px",
   },
 
   emptyIcon: {
     fontSize: "40px",
   },
 
-  userMessage: {
-    maxWidth: "75%",
-    marginLeft: "auto",
-    marginBottom: "15px",
-    padding: "13px 16px",
-    borderRadius: "12px",
-    background: "#2563eb",
-    color: "white",
-  },
-
-  aiMessage: {
-    maxWidth: "75%",
-    marginRight: "auto",
-    marginBottom: "15px",
-    padding: "13px 16px",
-    borderRadius: "12px",
-    background: "white",
+  reportCard: {
     border: "1px solid #e5e7eb",
-    color: "#374151",
+    borderRadius: "10px",
+    padding: "20px",
+    marginTop: "20px",
   },
 
-  messageLabel: {
-    fontWeight: "bold",
-    fontSize: "13px",
-    marginBottom: "6px",
-  },
-
-  inputRow: {
+  reportTop: {
     display: "flex",
-    gap: "10px",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "20px",
+  },
+
+  reportDate: {
+    color: "#6b7280",
+    fontSize: "13px",
+  },
+
+  section: {
     marginTop: "15px",
   },
 
-  textarea: {
-    flex: 1,
-    boxSizing: "border-box",
-    padding: "13px",
-    borderRadius: "8px",
-    border: "1px solid #d1d5db",
-    resize: "vertical",
-    fontSize: "15px",
+  reportText: {
+    color: "#374151",
+    lineHeight: "1.7",
+    whiteSpace: "pre-wrap",
   },
 
-  askButton: {
-    width: "80px",
-    border: "none",
+  aiBox: {
+    marginTop: "20px",
+    padding: "18px",
+    background: "#f3f4f6",
     borderRadius: "8px",
-    background: "#2563eb",
-    color: "white",
-    cursor: "pointer",
-    fontSize: "15px",
-  },
-
-  hint: {
-    fontSize: "12px",
-    color: "#9ca3af",
-    marginTop: "8px",
+    border: "1px solid #e5e7eb",
   },
 
   cardsRow: {
     display: "flex",
     gap: "20px",
+    marginBottom: "30px",
   },
 
   smallCard: {
@@ -607,13 +825,13 @@ const styles = {
     padding: "20px",
     borderRadius: "12px",
     flex: 1,
-    boxShadow: "0 2px 10px rgba(0,0,0,0.05)",
+    boxShadow:
+      "0 2px 10px rgba(0,0,0,0.05)",
   },
 
   icon: {
     fontSize: "28px",
   },
 };
-
 
 export default PatientDashboard;

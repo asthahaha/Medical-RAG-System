@@ -1,24 +1,28 @@
 import chromadb
 
-# Create ChromaDB client
-client = chromadb.PersistentClient(path="./chroma_db")
 
-# Create/Get Collection
+client = chromadb.PersistentClient(
+    path="./chroma_db"
+)
+
 collection = client.get_or_create_collection(
     name="medical_reports"
 )
 
 
 def store_chunks(chunks, embeddings, pdf_name):
-    """
-    Store PDF chunks in ChromaDB.
-    """
 
-    ids = [f"{pdf_name}_{i}" for i in range(len(chunks))]
+    ids = [
+        f"{pdf_name}_{i}"
+        for i in range(len(chunks))
+    ]
 
     metadatas = [
-        {"pdf_name": pdf_name}
-        for _ in chunks
+        {
+            "pdf_name": pdf_name,
+            "chunk_index": i
+        }
+        for i in range(len(chunks))
     ]
 
     collection.upsert(
@@ -28,46 +32,92 @@ def store_chunks(chunks, embeddings, pdf_name):
         metadatas=metadatas
     )
 
+    print("Stored chunks:", len(chunks))
 
-def search_chunks(query_embedding, n_results=3):
-    """
-    Search relevant chunks.
-    """
+
+def search_chunks(query_embedding, pdf_name=None, n_results=10):
+
+    query_arguments = {
+        "query_embeddings": [query_embedding],
+        "n_results": n_results,
+        "include": [
+            "documents",
+            "metadatas",
+            "distances"
+        ]
+    }
+
+    if pdf_name:
+        query_arguments["where"] = {
+            "pdf_name": pdf_name
+        }
 
     results = collection.query(
-        query_embeddings=[query_embedding],
-        n_results=n_results
+        **query_arguments
     )
 
-    if (
-        "documents" not in results
-        or len(results["documents"]) == 0
-    ):
-        return []
+    documents = results.get(
+        "documents",
+        [[]]
+    )[0]
 
-    return results["documents"][0]
+    metadatas = results.get(
+        "metadatas",
+        [[]]
+    )[0]
+
+    distances = results.get(
+        "distances",
+        [[]]
+    )[0]
+
+    print("\n========== CHROMADB RESULTS ==========")
+
+    for i, document in enumerate(documents):
+
+        print(f"\nCHUNK {i + 1}")
+
+        if i < len(distances):
+            print("Distance:", distances[i])
+
+        print(document[:1000])
+
+    return documents
 
 
 def delete_pdf(pdf_name):
-    """
-    Delete all chunks of one PDF.
-    """
 
-    data = collection.get()
+    data = collection.get(
+        include=["metadatas"]
+    )
 
-    ids = []
+    ids_to_delete = []
 
-    for i, meta in enumerate(data["metadatas"]):
-        if meta["pdf_name"] == pdf_name:
-            ids.append(data["ids"][i])
+    for i, metadata in enumerate(
+        data.get("metadatas", [])
+    ):
 
-    if ids:
-        collection.delete(ids=ids)
+        if metadata.get("pdf_name") == pdf_name:
+            ids_to_delete.append(
+                data["ids"][i]
+            )
+
+    if ids_to_delete:
+        collection.delete(
+            ids=ids_to_delete
+        )
 
 
 def get_all_documents():
-    """
-    Return all stored documents.
-    """
 
-    return collection.get()
+    return collection.get(
+        include=[
+            "documents",
+            "metadatas"
+        ]
+    )
+
+
+def get_collection_count():
+
+    return collection.count()

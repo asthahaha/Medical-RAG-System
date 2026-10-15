@@ -29,3 +29,5 @@ medical-backend/medical-rag-python/
 
 # Secrets
 medical-backend/src/main/resources/application.properties
+medical-backend/uploads/
+medical-rag-python/uploads/

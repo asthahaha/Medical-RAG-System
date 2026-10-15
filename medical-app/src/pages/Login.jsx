@@ -8,8 +8,11 @@ function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const handleLogin = (e) => {
+  const BACKEND_URL = "http://localhost:8080";
+
+  const handleLogin = async (e) => {
     e.preventDefault();
 
     setError("");
@@ -19,11 +22,104 @@ function Login() {
       return;
     }
 
-    // Demo authentication
-    if (role === "doctor") {
-      navigate("/doctor");
-    } else {
-      navigate("/patient");
+    setLoading(true);
+
+    try {
+      const endpoint =
+        role === "doctor"
+          ? "/api/doctor/login"
+          : "/api/patient/login";
+
+      const response = await fetch(
+        `${BACKEND_URL}${endpoint}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            email: email.trim(),
+            password,
+          }),
+        }
+      );
+
+      // Handle both JSON and plain-text responses
+      const contentType =
+        response.headers.get("content-type") || "";
+
+      let data;
+
+      if (contentType.includes("application/json")) {
+        data = await response.json();
+      } else {
+        const text = await response.text();
+        data = {
+          message: text,
+        };
+      }
+
+      if (!response.ok) {
+        throw new Error(
+          data.message || "Login failed."
+        );
+      }
+
+      // Make sure backend actually returned a token
+      if (!data.token) {
+        throw new Error(
+          "Login successful, but JWT token was not received."
+        );
+      }
+
+      // Store authentication information
+      localStorage.setItem(
+        "token",
+        data.token
+      );
+
+      localStorage.setItem(
+        "role",
+        data.role
+      );
+
+      localStorage.setItem(
+        "userId",
+        String(data.userId)
+      );
+
+      localStorage.setItem(
+        "name",
+        data.name || ""
+      );
+
+      localStorage.setItem(
+        "email",
+        data.email || email
+      );
+
+      // Redirect according to role
+      if (data.role === "DOCTOR") {
+        navigate("/doctor");
+      } else if (data.role === "PATIENT") {
+        navigate("/patient");
+      } else {
+        throw new Error(
+          "Unknown user role received from server."
+        );
+      }
+
+    } catch (err) {
+
+      console.error("Login error:", err);
+
+      setError(
+        err.message ||
+        "Unable to connect to the server."
+      );
+
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -48,7 +144,10 @@ function Login() {
 
           <button
             type="button"
-            onClick={() => setRole("patient")}
+            onClick={() => {
+              setRole("patient");
+              setError("");
+            }}
             style={
               role === "patient"
                 ? styles.activeRole
@@ -60,7 +159,10 @@ function Login() {
 
           <button
             type="button"
-            onClick={() => setRole("doctor")}
+            onClick={() => {
+              setRole("doctor");
+              setError("");
+            }}
             style={
               role === "doctor"
                 ? styles.activeRole
@@ -82,8 +184,11 @@ function Login() {
             type="email"
             placeholder="Enter your email"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) =>
+              setEmail(e.target.value)
+            }
             style={styles.input}
+            disabled={loading}
           />
 
           <label style={styles.label}>
@@ -94,8 +199,11 @@ function Login() {
             type="password"
             placeholder="Enter your password"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(e) =>
+              setPassword(e.target.value)
+            }
             style={styles.input}
+            disabled={loading}
           />
 
           {error && (
@@ -107,22 +215,27 @@ function Login() {
           <button
             type="submit"
             style={styles.loginButton}
+            disabled={loading}
           >
-            Login as {role === "doctor" ? "Doctor" : "Patient"}
+            {loading
+              ? "Logging in..."
+              : `Login as ${
+                  role === "doctor"
+                    ? "Doctor"
+                    : "Patient"
+                }`}
           </button>
 
         </form>
 
         <p style={styles.demoText}>
-          Demo authentication — backend authentication
-          will be added later.
+          Secure JWT authentication
         </p>
 
       </div>
     </div>
   );
 }
-
 
 const styles = {
   page: {
@@ -139,7 +252,8 @@ const styles = {
     background: "white",
     padding: "40px",
     borderRadius: "16px",
-    boxShadow: "0 8px 30px rgba(0,0,0,0.08)",
+    boxShadow:
+      "0 8px 30px rgba(0,0,0,0.08)",
   },
 
   logo: {
@@ -218,6 +332,7 @@ const styles = {
   error: {
     color: "#dc2626",
     fontSize: "14px",
+    marginBottom: "15px",
   },
 
   demoText: {
@@ -227,6 +342,5 @@ const styles = {
     fontSize: "12px",
   },
 };
-
 
 export default Login;
